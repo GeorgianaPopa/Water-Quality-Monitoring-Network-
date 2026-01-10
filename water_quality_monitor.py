@@ -1,39 +1,48 @@
 import csv
 import time
-from sensor_simulator import *
+from collections import defaultdict
+from sensor_simulator import read_sensors, NODES
 
-THRESHOLDS = {
-    "ph_min": 6.5,
-    "ph_max": 8.5,
-    "turbidity_max": 5.0,
-    "tds_max": 300
-}
+WINDOW_SIZE = 10  
+
+history = defaultdict(list)
+
+def adaptive_threshold(values, margin):
+    avg = sum(values) / len(values)
+    return avg - margin, avg + margin
+
 
 with open("water_data.csv", "w", newline="") as file:
     writer = csv.writer(file)
-    writer.writerow(["Time", "Temperature", "pH", "Turbidity", "TDS", "Status"])
+    writer.writerow(["Time", "Node", "Temperature", "pH", "Turbidity", "Status"])
 
 while True:
-    temperature = read_temperature()
-    ph = read_ph()
-    turbidity = read_turbidity()
-    tds = read_tds()
+    for node in NODES.keys():
+        temperature, ph, turbidity = read_sensors(node)
 
-    status = "GOOD"
+        history[node].append(ph)
+        if len(history[node]) > WINDOW_SIZE:
+            history[node].pop(0)
 
-    if ph < THRESHOLDS["ph_min"] or ph > THRESHOLDS["ph_max"]:
-        status = "BAD"
-    if turbidity > THRESHOLDS["turbidity_max"]:
-        status = "BAD"
-    if tds > THRESHOLDS["tds_max"]:
-        status = "BAD"
+        if len(history[node]) >= 5:
+            ph_min, ph_max = adaptive_threshold(history[node], margin=0.7)
+        else:
+            ph_min, ph_max = 6.5, 8.5
 
-    timestamp = time.strftime("%H:%M:%S")
+        status = "GOOD"
+        if ph < ph_min or ph > ph_max or turbidity > 5:
+            status = "BAD"
 
-    with open("water_data.csv", "a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow([timestamp, temperature, ph, turbidity, tds, status])
+        timestamp = time.strftime("%H:%M:%S")
 
-    print(f"[{timestamp}] Temp={temperature}°C | pH={ph} | Turb={turbidity} | TDS={tds} → {status}")
+        with open("water_data.csv", "a", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow([timestamp, node, temperature, ph, turbidity, status])
+
+        print(
+            f"[{timestamp}] {node} | "
+            f"T={temperature}°C | pH={ph} ({ph_min:.2f}-{ph_max:.2f}) | "
+            f"Turb={turbidity} → {status}"
+        )
 
     time.sleep(5)
